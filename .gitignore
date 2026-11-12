@@ -1,0 +1,14 @@
+.env*
+!.env.example
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.pytest_cache/
+.deepeval/
+vdoc/
+*.log
+/auditor_test.txt
+/current_summary.txt
+/edge_case_output.txt
+/tests/*results.json
