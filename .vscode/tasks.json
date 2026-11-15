@@ -1,0 +1,27 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start application containers",
+			"type": "shell",
+			"command": "docker",
+			"args": [
+				"compose",
+				"up",
+				"-d",
+				"--build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Check Streamlit endpoint",
+			"type": "shell",
+			"command": "curl",
+			"args": [
+				"-fsSI",
+				"http://localhost:8501"
+			],
+			"isBackground": false
+		}
+	]
+}

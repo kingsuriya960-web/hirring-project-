@@ -6,13 +6,13 @@
 markdown
 # Agentic Compliance Auditor & Multi-Agent RAG Pipeline
 
-An enterprise-grade, asynchronous compliance tracking and contract auditing platform built with **FastAPI** and **LangGraph**. This system replaces basic, fragile sequential chains with a stateful, self-correcting multi-agent loop that parses unstructured financial/legal documents, stores data using a parent-child RAG architecture, and programmatically reflects on output quality to guarantee zero-hallucination compliance verification.
+A contract-review prototype built with **FastAPI** and **LangGraph**. It parses PDF documents, retrieves contract passages with a parent-child RAG design, and uses an auditor/critic workflow. Automated results are decision support only: citations, interpretation, and amendment precedence require human verification.
 
 ## 🚀 Key Architectural Highlights (The Hiring "Moat")
-* **Stateful Cyclic Architecture:** Utilizes LangGraph to implement a multi-agent feedback loop (Auditor Agent $\rightarrow$ Critic Agent) allowing the system to catch its own mistakes, refine criteria, and correct citations before returning output.
+* **Stateful Cyclic Architecture:** Uses LangGraph to run an Auditor Agent and a Critic Agent, with bounded retries when review fails.
 * **Parent-Child Chunking Strategy:** Dodge token truncation and loss-of-context issues by indexing granular child chunks ($400$ characters) for high-precision semantic matching while feeding larger parent contexts ($2000$ characters) to the LLM generation layer.
 * **Asynchronous Streaming Gateway:** Written natively in FastAPI utilizing asynchronous I/O and server-side events (`StreamingResponse`) to stream token-by-token agent reasoning steps to the client.
-* **Production-Grade Observability:** Fully instrumented with open telemetry and tracing via LangSmith/Arize Phoenix to evaluate latency, prompt costs, token allocations, and trajectory errors.
+* **Evaluation visibility:** Reports expose the analysis and citation-review modes, token/cost estimates, and prominent warnings when local fallback logic is used.
 
 ---
 
@@ -53,10 +53,10 @@ Loop Retry └───────   Critic Agent (Node)   │
 
 * **Backend Engine:** FastAPI (Python 3.11+, fully asynchronous runtime execution)
 * **Agentic Orchestration:** LangGraph (Stateful, multi-agent network topologies)
-* **LLM Layer Integration:** LiteLLM (Enterprise abstraction layer with native retry and failover management)
+* **LLM Layer Integration:** LiteLLM with configurable timeout and retry/backoff settings
 * **Vector Infrastructure:** Qdrant Cloud/Self-Hosted (Dense embeddings with metadata payload mapping)
 * **Document Parsing Core:** PyPDF / Structured layout extraction
-* **Observability & Guardrails:** LangSmith (Full lifecycle tracing & latency metrics profiling)
+* **Guardrails:** Prompt-injection checks, budget limits, and deterministic citation validation; provider use is exposed in report metadata
 
 ---
 
@@ -76,10 +76,11 @@ agentic-compliance-auditor/
 │       ├── __init__.py
 │       ├── vector_db.py   # Qdrant Indexing, Schema Management, and Parent-Child RAG
 │       └── parser.py      # PDF parsing algorithms and window splitting logic
-├── Dockerfile             # Multi-stage optimized application container
+├── Dockerfile             # Application container
 ├── docker-compose.yml     # Local orchestration for FastAPI and Qdrant instances
 ├── requirements.txt       # Strict pin-controlled dependencies list
-└── .env                   # Configuration environmental variables template
+├── .env.example           # Safe environment-variable template; never put real keys in Git
+└── tests/live_gemini_smoke.py # Optional live-model workflow check
 ```
 
 ---
@@ -89,13 +90,15 @@ agentic-compliance-auditor/
 This repository is optimized for isolated cloud environments (GitHub Codespaces, Gitpod, Project IDX) and local development. 
 
 ### 1. Environmental Variables Configuration
-Create a `.env` file in the project root with a valid Google AI Studio API key:
+Copy `.env.example` to `.env` and add a valid Google AI Studio API key locally. `.env` is ignored by Git; never commit real credentials.
 ```env
-GEMINI_API_KEY=your-google-ai-studio-key
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_API_KEY=lsv2_pt_...
-LANGCHAIN_PROJECT="compliance-auditor"
+GEMINI_API_KEY=your-key
 ```
+The Gemini primary model and comma-separated fallback models are configurable through `GEMINI_MODEL` and `GEMINI_FALLBACK_MODELS`. The defaults use `gemini-3.8-flash` first, then `gemini-3.6-flash` and `gemini-3.5-flash`. On quota exhaustion or provider unavailability, the auditor and critic move to the next configured Gemini model; connection timeouts use the configured retries and exponential backoff (`GEMINI_TIMEOUT_SECONDS`, `GEMINI_MAX_RETRIES`, and `GEMINI_RETRY_BACKOFF_SECONDS`). The selected model is recorded in report metadata.
+
+Run the local test suite with `pytest -q`. To make 5–10 live requests using only the script's synthetic sample contract, run `python tests/live_gemini_smoke.py --runs 5`. This live check requires your local API key and may incur provider charges. It reports whether both auditor and critic used Gemini; do not treat mock/local tests as evidence of live-provider success.
+
+If every configured Gemini model is unavailable, the API returns HTTP 503 and does not produce or deliver heuristic findings. Check model availability and quota in Google AI Studio, then retry or configure another Gemini model available to your account.
 
 ### 2. Stand Up Infrastructure
 Spin up the backend API gateway alongside the Qdrant database clusters with a single command:
@@ -106,9 +109,9 @@ The contract review dashboard is at `http://localhost:8000/dashboard`; upload a 
 
 ---
 
-## 🧪 Production Metrics & Evaluation Resumé Template
+## 🧪 Evaluation and client-facing claims
 
-When adding this project to your professional profile or presenting it to hiring managers, utilize the following core-impact statements:
+Do not present accuracy, latency, or cost-improvement percentages as measured results unless you have benchmark data to support them. The live smoke test records request duration for the synthetic test case; it is not a comparison against manual review and does not establish accuracy.
 
-> "Architected an asynchronous multi-agent compliance validation platform using **LangGraph** and **FastAPI**, eliminating deterministic linear pipelines in favor of an iterative self-correction loop. Designed a custom parent-child RAG storage layer utilizing **Qdrant** to resolve context-window precision limits, improving snippet extraction accuracy by **42%**. Integrated **LangSmith** tracking to profile agent traversal trees, leading to custom fallback routing rules that dropped total API operational overhead costs by **28%**."
+Client-facing materials and reports should state that this is automated decision support, not legal advice. A qualified reviewer should verify all findings, citations, and amendment precedence against the signed agreement.
 

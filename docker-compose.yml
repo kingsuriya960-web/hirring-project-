@@ -6,6 +6,7 @@ services:
     volumes:
       - ./app:/code/app
     environment:
+      - VERTEXAI_API_KEY=${VERTEXAI_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - QDRANT_HOST=qdrant
     depends_on:
@@ -18,13 +19,18 @@ services:
     volumes:
       - ./app:/code/app
     environment:
-      - BACKEND_URL=http://api:8000
+      - VERTEXAI_API_KEY=${VERTEXAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - QDRANT_HOST=qdrant
     command: ["streamlit", "run", "app/frontend.py", "--server.port=8501", "--server.address=0.0.0.0"]
     depends_on:
       - api
 
   qdrant:
     image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
 

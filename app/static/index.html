@@ -2,164 +2,244 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#101a19">
-    <title>Compliance Audit Workspace</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f8fafc">
+    <title>Veritas Compliance — Enterprise Review</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        :root {
-            color-scheme: dark;
-            --ink: #edf2ef;
-            --muted: #9eada7;
-            --line: #344542;
-            --surface: #192522;
-            --surface-raised: #202f2b;
-            --canvas: #101a19;
-            --green: #64bd8e;
-            --green-dark: #28714d;
-            --red: #f08a82;
-            --amber: #ecc56f;
-            --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-            --sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
-        }
-        * { box-sizing: border-box; }
-        body { margin: 0; background: var(--canvas); color: var(--ink); font: 15px/1.5 var(--sans); }
-        header { padding: 18px max(20px, calc((100vw - 960px) / 2)); border-bottom: 1px solid var(--line); background: #15211e; }
-        .brand { display: flex; align-items: center; gap: 12px; max-width: 960px; margin: auto; }
-        .mark { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 4px; background: var(--green-dark); color: white; font-weight: 700; }
-        .brand-name { font-weight: 700; }
-        .brand-note { color: var(--muted); font-size: 12px; }
-        main { max-width: 960px; margin: auto; padding: 36px 20px 52px; }
-        .eyebrow { color: var(--green); font: 700 11px var(--mono); text-transform: uppercase; }
-        h1 { margin: 8px 0 6px; font-size: 28px; line-height: 1.2; }
-        .intro { max-width: 660px; margin: 0 0 25px; color: var(--muted); }
-        .workflow { padding: 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; }
-        label { display: block; margin: 14px 0 7px; font-size: 13px; font-weight: 650; }
-        input[type="file"], textarea { width: 100%; color: var(--ink); font: inherit; }
-        input[type="file"] { padding: 16px; border: 1px dashed #71847c; border-radius: 4px; background: var(--surface-raised); }
-        textarea { min-height: 120px; resize: vertical; padding: 11px; border: 1px solid var(--line); border-radius: 4px; background: #111d1a; }
-        textarea:focus { outline: 2px solid #64bd8e55; border-color: var(--green); }
-        button { min-height: 44px; padding: 11px 16px; border: 0; border-radius: 4px; color: #0c2117; background: var(--green); font: 700 14px var(--sans); cursor: pointer; }
-        button:hover { background: #7bc99f; }
-        button:disabled { cursor: wait; opacity: .65; }
-        #run-button { width: 100%; margin-top: 20px; }
-        .status { min-height: 22px; margin-top: 14px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
-        .status.error { color: var(--red); }
-        .status.pending { color: var(--amber); }
-        .scorecard { display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--line); }
-        .scorecard.visible { display: block; }
-        .score-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
-        .score-item { padding: 12px; background: var(--surface-raised); border-radius: 4px; }
-        .score-label { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; }
-        .score-value { display: block; margin-top: 4px; font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
-        .warning { color: var(--amber); font-size: 13px; }
-        .small { color: var(--muted); font-size: 12px; }
-        @media (max-width: 620px) {
-            header { padding: 14px 16px; }
-            main { padding: 25px 14px 36px; }
-            .workflow { padding: 17px; }
-            h1 { font-size: 23px; }
-            .score-grid { grid-template-columns: 1fr; }
-        }
+        [hidden] { display: none !important; }
     </style>
 </head>
-<body>
-    <header>
-        <div class="brand">
-            <div class="mark" aria-hidden="true">C</div>
-            <div><div class="brand-name">Compliance Review</div><div class="brand-note">Automated contract analysis</div></div>
+<body class="min-h-screen bg-[#F8FAFC] font-sans text-slate-900 antialiased">
+    <nav class="flex items-center justify-between border-b border-slate-200 bg-white px-8 py-3.5">
+        <div class="flex items-center space-x-2.5">
+            <div class="flex h-7 w-7 items-center justify-center rounded-lg bg-[#2563EB] p-1.5 text-sm font-bold text-white" aria-hidden="true">✓</div>
+            <span class="text-lg font-bold tracking-tight text-slate-900">Veritas Compliance</span>
         </div>
-    </header>
-    <main>
-        <div class="eyebrow">Document workflow</div>
-        <h1>Compile and audit a contract</h1>
-        <p class="intro">Upload a PDF and specify the rules to check. The report includes findings, contract citations, citation review, and analysis method.</p>
-        <section class="workflow" aria-label="Contract compliance audit">
-            <form id="audit-form">
-                <label for="contract-file">Contract PDF</label>
-                <input id="contract-file" name="file" type="file" accept="application/pdf,.pdf" required>
-                <label for="rules">Compliance rules</label>
-                <textarea id="rules" name="rules" placeholder="One rule per line, or separate rules with commas.&#10;Example: Termination requires 30 days notice.&#10;Late fees cannot exceed 5%." required></textarea>
-                <button id="run-button" type="submit">Compile and audit contract</button>
-            </form>
-            <div id="status" class="status" role="status" aria-live="polite"></div>
-            <section id="scorecard" class="scorecard" aria-live="polite">
-                <h2>Audit complete</h2>
-                <div class="score-grid">
-                    <div class="score-item"><span class="score-label">Compliance result</span><span id="compliance" class="score-value"></span></div>
-                    <div class="score-item"><span class="score-label">Citation review</span><span id="citation" class="score-value"></span></div>
-                    <div class="score-item"><span class="score-label">Analysis method</span><span id="analysis" class="score-value"></span></div>
-                </div>
-                <p id="warning" class="warning"></p>
-                <p class="small">The downloadable report is automated decision support, not legal advice.</p>
-                <button id="download-button" type="button">Download audit report PDF</button>
-            </section>
-        </section>
-    </main>
-    <script>
-        const form = document.getElementById("audit-form");
-        const runButton = document.getElementById("run-button");
-        const downloadButton = document.getElementById("download-button");
-        const statusBox = document.getElementById("status");
-        const scorecard = document.getElementById("scorecard");
-        let reportBlob = null;
-        let reportFilename = "COMPLIANCE_AUDIT_REPORT.pdf";
+        <div class="flex items-center space-x-6 text-sm font-medium text-slate-500">
+            <span class="font-semibold text-slate-900">Dashboard</span>
+            <span>Contract audit</span>
+        </div>
+    </nav>
 
-        function downloadReport() {
-            if (!reportBlob) return;
-            const objectUrl = URL.createObjectURL(reportBlob);
+    <main class="mx-auto max-w-5xl px-6 py-10">
+        <header class="mb-8">
+            <span class="mb-3 inline-block rounded-md bg-blue-50 px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-[#2563EB]">AI-Powered Audit</span>
+            <h1 class="text-3xl font-extrabold tracking-tight text-slate-900">Enterprise Compliance Review</h1>
+            <p class="mt-1.5 max-w-2xl text-base text-slate-500">Upload a contract and your rule set once — get cited, rule-by-rule findings and a downloadable report.</p>
+        </header>
+
+        <section class="mb-8 grid grid-cols-1 gap-5 md:grid-cols-3" aria-label="Audit session statistics">
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div class="text-2xl font-extrabold text-slate-900" id="auditCount">0</div>
+                <div class="mt-1 text-xs font-medium text-slate-500">Contracts audited this session</div>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div class="text-2xl font-extrabold text-slate-900" id="averageReviewTime">—</div>
+                <div class="mt-1 text-xs font-medium text-slate-500">Average review time this session</div>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div class="text-2xl font-extrabold text-emerald-600" id="citationAccuracy">—</div>
+                <div class="mt-1 text-xs font-medium text-slate-500">Citation verification rate</div>
+            </div>
+        </section>
+
+        <section class="mb-6 grid grid-cols-1 gap-6 md:grid-cols-2" aria-label="Audit inputs">
+            <div class="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div>
+                    <h2 class="text-base font-bold text-slate-900">Contract PDF</h2>
+                    <p class="mb-4 mt-0.5 text-xs text-slate-500">Drop in a file or browse. PDF only.</p>
+                    <div id="dropZone" role="button" tabindex="0" aria-label="Choose or drop a contract PDF" class="cursor-pointer rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/50 p-8 text-center transition-colors hover:border-[#2563EB]">
+                        <input type="file" id="pdfInput" accept="application/pdf,.pdf" class="hidden">
+                        <div class="mb-2 text-xl text-[#2563EB]" aria-hidden="true">↑</div>
+                        <div class="text-sm font-semibold text-slate-800">Drop your contract here</div>
+                        <div class="mt-1 text-xs text-slate-400">or click to browse files</div>
+                    </div>
+                </div>
+                <div id="filePill" hidden class="mt-4 items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5">
+                    <div class="flex min-w-0 items-center space-x-2">
+                        <span class="text-sm text-[#2563EB]" aria-hidden="true">📄</span>
+                        <span id="fileName" class="truncate text-xs font-semibold text-slate-800"></span>
+                    </div>
+                    <div class="ml-3 flex shrink-0 items-center space-x-2">
+                        <span id="fileSize" class="text-xs text-slate-400"></span>
+                        <button id="clearFileButton" type="button" class="ml-1 text-xs font-bold text-slate-400 hover:text-red-500" aria-label="Remove selected file">✕</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex flex-col rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h2 class="text-base font-bold text-slate-900">Compliance Rules</h2>
+                <p class="mb-4 mt-0.5 text-xs text-slate-500">One rule per line. These apply to the contract you upload.</p>
+                <textarea id="rulesBox" rows="7" aria-label="Compliance rules, one per line" class="w-full flex-1 resize-y rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-sm leading-relaxed text-slate-800 transition-colors focus:border-[#2563EB] focus:bg-white focus:outline-none">Payment terms must be Net-30 or better across all tiers.
+Liability cap must be at least 3x the fees paid in the preceding 12 months.
+Security breach notification must be within 24 hours of confirmation.
+Governing law must be Delaware.</textarea>
+            </div>
+        </section>
+
+        <button id="auditBtn" type="button" class="flex w-full items-center justify-center space-x-2 rounded-xl bg-[#2563EB] px-6 py-3.5 text-sm font-bold text-white shadow-md transition-all hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-75">
+            <span aria-hidden="true">⚡</span>
+            <span id="btnText">Compile and Audit Contract</span>
+        </button>
+        <div id="statusBanner" role="status" aria-live="polite" hidden class="mt-4 rounded-xl p-4 text-center text-sm font-medium"></div>
+        <p class="mt-6 text-center text-xs text-slate-400">Automated decision support, not legal advice. Review cited contract language before making decisions.</p>
+    </main>
+
+    <script>
+        let selectedFile = null;
+        let sessionAudits = 0;
+        let sessionDuration = 0;
+        let sessionCitationsReviewed = 0;
+        let sessionCitationsVerified = 0;
+
+        const dropZone = document.getElementById("dropZone");
+        const fileInput = document.getElementById("pdfInput");
+        const filePill = document.getElementById("filePill");
+        const auditButton = document.getElementById("auditBtn");
+        const buttonText = document.getElementById("btnText");
+
+        function showBanner(message, type) {
+            const banner = document.getElementById("statusBanner");
+            banner.classList.remove("bg-blue-50", "text-blue-700", "bg-emerald-50", "text-emerald-700", "bg-red-50", "text-red-700");
+            if (type === "loading") banner.classList.add("bg-blue-50", "text-blue-700");
+            if (type === "success") banner.classList.add("bg-emerald-50", "text-emerald-700");
+            if (type === "error") banner.classList.add("bg-red-50", "text-red-700");
+            banner.textContent = message;
+            banner.hidden = false;
+        }
+
+        function formatDuration(seconds) {
+            const roundedSeconds = Math.round(seconds);
+            if (roundedSeconds < 60) return `${roundedSeconds} sec`;
+            const minutes = Math.floor(roundedSeconds / 60);
+            const remainder = roundedSeconds % 60;
+            return remainder ? `${minutes} min ${remainder} sec` : `${minutes} min`;
+        }
+
+        function updateSessionStats(duration, counts) {
+            sessionAudits += 1;
+            sessionDuration += duration;
+            sessionCitationsReviewed += Number(counts.citations_reviewed) || 0;
+            sessionCitationsVerified += Number(counts.citations_verified) || 0;
+            document.getElementById("auditCount").textContent = sessionAudits.toLocaleString();
+            document.getElementById("averageReviewTime").textContent = formatDuration(sessionDuration / sessionAudits);
+            document.getElementById("citationAccuracy").textContent = sessionCitationsReviewed
+                ? `${(sessionCitationsVerified / sessionCitationsReviewed * 100).toFixed(1)}%`
+                : "—";
+        }
+
+        function handleFileSelect(file) {
+            if (!file) return;
+            if (!file.name.toLowerCase().endsWith(".pdf")) {
+                selectedFile = null;
+                fileInput.value = "";
+                filePill.hidden = true;
+                showBanner("Please choose a PDF file to run the audit.", "error");
+                return;
+            }
+
+            selectedFile = file;
+            document.getElementById("fileName").textContent = file.name;
+            document.getElementById("fileSize").textContent = file.size < 1024 * 1024
+                ? `${Math.max(1, Math.round(file.size / 1024))} KB`
+                : `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+            filePill.hidden = false;
+            filePill.classList.add("flex");
+            document.getElementById("statusBanner").hidden = true;
+        }
+
+        function clearFile() {
+            selectedFile = null;
+            fileInput.value = "";
+            filePill.hidden = true;
+            filePill.classList.remove("flex");
+        }
+
+        function downloadReport(blob, filename) {
+            const objectUrl = URL.createObjectURL(blob);
             const link = document.createElement("a");
             link.href = objectUrl;
-            link.download = reportFilename;
+            link.download = filename;
             document.body.appendChild(link);
             link.click();
             link.remove();
             window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
         }
 
-        form.addEventListener("submit", async (event) => {
-            event.preventDefault();
-            const file = document.getElementById("contract-file").files[0];
-            const rules = document.getElementById("rules").value.trim();
-            if (!file || !rules) return;
-
-            const payload = new FormData();
-            payload.append("file", file);
-            payload.append("rules", rules);
-            runButton.disabled = true;
-            scorecard.classList.remove("visible");
-            statusBox.className = "status pending";
-            statusBox.textContent = "Parsing, indexing, auditing, and preparing your PDF report…";
-            reportBlob = null;
-
-            try {
-                const response = await fetch("/api/v1/auto-audit", { method: "POST", body: payload });
-                if (!response.ok) {
-                    const error = await response.json().catch(() => ({}));
-                    throw new Error(error.detail || `Audit failed (${response.status}).`);
-                }
-
-                reportBlob = await response.blob();
-                const disposition = response.headers.get("content-disposition") || "";
-                const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
-                reportFilename = filenameMatch ? filenameMatch[1] : reportFilename;
-                document.getElementById("compliance").textContent = (response.headers.get("x-compliance-status") || "undetermined").replaceAll("_", " ").toUpperCase();
-                document.getElementById("citation").textContent = (response.headers.get("x-citation-review") || "unknown").toUpperCase();
-                const mode = response.headers.get("x-analysis-mode") || "unknown";
-                document.getElementById("analysis").textContent = mode.replaceAll("_", " ");
-                document.getElementById("warning").textContent = mode === "heuristic_fallback" ? "Gemini was unavailable; local heuristic analysis was used. Review the report carefully." : "";
-                scorecard.classList.add("visible");
-                statusBox.className = "status";
-                statusBox.textContent = "Audit completed. Your PDF report is ready to download.";
-                downloadReport();
-            } catch (error) {
-                statusBox.className = "status error";
-                statusBox.textContent = error.message;
-            } finally {
-                runButton.disabled = false;
+        fileInput.addEventListener("change", () => handleFileSelect(fileInput.files[0]));
+        dropZone.addEventListener("click", () => fileInput.click());
+        dropZone.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                fileInput.click();
             }
         });
+        for (const eventName of ["dragenter", "dragover"]) {
+            dropZone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                dropZone.classList.add("border-[#2563EB]", "bg-blue-50/30");
+            });
+        }
+        for (const eventName of ["dragleave", "drop"]) {
+            dropZone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                dropZone.classList.remove("border-[#2563EB]", "bg-blue-50/30");
+            });
+        }
+        dropZone.addEventListener("drop", (event) => {
+            const file = event.dataTransfer.files[0];
+            if (file) handleFileSelect(file);
+        });
+        document.getElementById("clearFileButton").addEventListener("click", clearFile);
 
-        downloadButton.addEventListener("click", downloadReport);
+        auditButton.addEventListener("click", async () => {
+            const rules = document.getElementById("rulesBox").value.trim();
+            if (!selectedFile) {
+                showBanner("Please upload a Contract PDF first.", "error");
+                return;
+            }
+            if (!rules) {
+                showBanner("Please enter at least one compliance rule.", "error");
+                return;
+            }
+
+            auditButton.disabled = true;
+            buttonText.textContent = "Auditing Contract & Generating PDF Report...";
+            showBanner("Multi-Agent Pipeline Active: Extracting clauses, verifying citations, and compiling your report...", "loading");
+            const startedAt = performance.now();
+            const formData = new FormData();
+            formData.append("file", selectedFile);
+            formData.append("rules", rules);
+
+            try {
+                const response = await fetch("/api/v1/auto-audit", { method: "POST", body: formData });
+                if (!response.ok) {
+                    let detail = `Audit failed (${response.status}).`;
+                    try {
+                        const error = await response.json();
+                        if (error.detail) detail = error.detail;
+                    } catch {
+                        // Keep the HTTP status message when the response is not JSON.
+                    }
+                    throw new Error(detail);
+                }
+
+                const blob = await response.blob();
+                const disposition = response.headers.get("content-disposition") || "";
+                const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+                const filename = filenameMatch ? filenameMatch[1] : `COMPLIANCE_AUDIT_${selectedFile.name.replace(/\.pdf$/i, "")}.pdf`;
+                const counts = JSON.parse(response.headers.get("x-finding-counts") || "{}");
+                updateSessionStats((performance.now() - startedAt) / 1000, counts);
+                downloadReport(blob, filename);
+                showBanner("Audit complete! Your compliance report PDF has downloaded.", "success");
+            } catch (error) {
+                showBanner(error instanceof Error ? error.message : "The audit failed unexpectedly.", "error");
+            } finally {
+                auditButton.disabled = false;
+                buttonText.textContent = "Compile and Audit Contract";
+            }
+        });
     </script>
 </body>
 </html>
