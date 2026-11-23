@@ -7,7 +7,7 @@ from litellm import embedding
 class VectorStoreService:
     def __init__(self):
         qdrant_host = os.getenv("QDRANT_HOST", "localhost")
-        self.client = QdrantClient(host=qdrant_host, port=6333)
+        self.client = QdrantClient(host=qdrant_host, port=6333, timeout=3.0)
         self.collection_name = "compliance_documents"
         self._ensure_collection()
 

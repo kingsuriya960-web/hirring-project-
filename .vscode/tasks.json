@@ -22,6 +22,41 @@
 				"http://localhost:8501"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "Package source for AI review",
+			"type": "shell",
+			"command": "python",
+			"args": [
+				"-c",
+				"from pathlib import Path; from zipfile import ZipFile, ZIP_DEFLATED; root=Path(\".\"); out=root/\"hirring-project-source.zip\"; excluded={\".git\",\".venv\",\"__pycache__\",\".pytest_cache\",\".deepeval\",\"node_modules\"}; files=[p for p in root.rglob(\"*\") if p.is_file() and not any(part in excluded for part in p.parts) and p.name!=out.name and (not p.name.startswith(\".env\") or p.name==\".env.example\")]; z=ZipFile(out,\"w\",ZIP_DEFLATED); [z.write(p,p.relative_to(root).as_posix()) for p in files]; z.close(); print(f\"Created {out} with {len(files)} files ({out.stat().st_size} bytes)\")"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Check commit contents",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"status",
+				"--short",
+				"--untracked-files=all"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "Review pending project diff",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"diff",
+				"--",
+				".vscode/tasks.json",
+				"app/agents/nodes.py",
+				"app/services/report_generator.py",
+				"docker-compose.yml"
+			],
+			"isBackground": false
 		}
 	]
 }

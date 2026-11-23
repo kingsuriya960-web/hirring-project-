@@ -12,7 +12,7 @@ A contract-review prototype built with **FastAPI** and **LangGraph**. It parses 
 * **Stateful Cyclic Architecture:** Uses LangGraph to run an Auditor Agent and a Critic Agent, with bounded retries when review fails.
 * **Parent-Child Chunking Strategy:** Dodge token truncation and loss-of-context issues by indexing granular child chunks ($400$ characters) for high-precision semantic matching while feeding larger parent contexts ($2000$ characters) to the LLM generation layer.
 * **Asynchronous Streaming Gateway:** Written natively in FastAPI utilizing asynchronous I/O and server-side events (`StreamingResponse`) to stream token-by-token agent reasoning steps to the client.
-* **Evaluation visibility:** Reports expose the analysis and citation-review modes, token/cost estimates, and prominent warnings when local fallback logic is used.
+* **Evaluation visibility:** Reports expose audit and citation-review status and stop with an incomplete/manual-review warning when either AI agent is unavailable.
 
 ---
 
@@ -90,15 +90,28 @@ agentic-compliance-auditor/
 This repository is optimized for isolated cloud environments (GitHub Codespaces, Gitpod, Project IDX) and local development. 
 
 ### 1. Environmental Variables Configuration
-Copy `.env.example` to `.env` and add a valid Google AI Studio API key locally. `.env` is ignored by Git; never commit real credentials.
+Copy `.env.example` to `.env` and add a valid OpenRouter API key locally. `.env` is ignored by Git; never commit real credentials.
 ```env
-GEMINI_API_KEY=your-key
+OPENROUTER_API_KEY=sk-or-v1-your-key
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+GEMINI_API_KEY=your-key          # optional: only used for Qdrant embeddings
 ```
-The Gemini primary model and comma-separated fallback models are configurable through `GEMINI_MODEL` and `GEMINI_FALLBACK_MODELS`. The defaults use `gemini-3.8-flash` first, then `gemini-3.6-flash` and `gemini-3.5-flash`. On quota exhaustion or provider unavailability, the auditor and critic move to the next configured Gemini model; connection timeouts use the configured retries and exponential backoff (`GEMINI_TIMEOUT_SECONDS`, `GEMINI_MAX_RETRIES`, and `GEMINI_RETRY_BACKOFF_SECONDS`). The selected model is recorded in report metadata.
+The auditor and critic use free OpenRouter models. At runtime the app queries `GET /models`, keeps the `:free` entries, and tries up to five candidates (instruction-following families first) with bounded retries. If discovery fails, it falls back to the slugs listed in `FALLBACK_MODELS` inside `app/agents/nodes.py`. The model that produced the report is recorded in the report metadata.
 
-Run the local test suite with `pytest -q`. To make 5–10 live requests using only the script's synthetic sample contract, run `python tests/live_gemini_smoke.py --runs 5`. This live check requires your local API key and may incur provider charges. It reports whether both auditor and critic used Gemini; do not treat mock/local tests as evidence of live-provider success.
+`OPENROUTER_API_KEY` must start with `sk-or-v1-`. Do not hard-code the key inside `${...}` in `docker-compose.yml`; Docker Compose treats `${sk-or-v1-...}` as "variable `sk` with default `or-v1-...`", silently removes the `sk-` prefix, and OpenRouter then answers `401 Missing Authentication header`. Compose already reads `.env` from the project root, so the correct declaration is:
+```yaml
+environment:
+  - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+```
 
-If every configured Gemini model is unavailable, the API returns HTTP 503 and does not produce or deliver heuristic findings. Check model availability and quota in Google AI Studio, then retry or configure another Gemini model available to your account.
+Authentication failures (HTTP 401/403) abort the run immediately with an actionable message instead of retrying every candidate model. Rate limits, timeouts, and 5xx responses are retried; other 4xx model errors move on to the next free model.
+If OpenRouter returns `free-models-per-day`, the account-wide daily free-model quota is exhausted; the app stops retrying because switching free models will not bypass it. Wait for the quota to reset or add credits to the OpenRouter account to unlock more free-model requests.
+
+Run the local test suite with `pytest -q`. The auditor and critic require a live OpenRouter key; mock/local tests do not prove live-provider success.
+
+If the auditor or critic is unavailable, the audit ends incomplete, citation review is marked `NOT RUN` when it did not execute, and the PDF withholds findings rather than substituting heuristic verdicts. Successful reports distinguish `Gap — Missing Protection` findings, include an executive summary, missing-risk descriptions, and per-finding confidence.
+
+The Streamlit dashboard classifies uploaded contracts as consulting, SaaS/subscription, vendor/supply, NDA, or lease/real estate before auditing. Users can confirm or change the detected type. For consulting agreements, it flags breach-notification and data-retention rules as potentially inapplicable and lets the user remove those rules or run them anyway.
 
 ### 2. Stand Up Infrastructure
 Spin up the backend API gateway alongside the Qdrant database clusters with a single command:

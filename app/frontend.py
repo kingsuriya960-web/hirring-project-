@@ -1,4 +1,3 @@
-import io
 import os
 import sys
 import time
@@ -6,7 +5,6 @@ import uuid
 from datetime import datetime
 
 import streamlit as st
-from pypdf import PdfReader
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -17,8 +15,8 @@ if os.path.exists(".env"):
                 key, value = line.strip().split("=", 1)
                 os.environ.setdefault(key, value.strip("\"'"))
 
-from app.services.parser import DocumentParserService
-from app.services.report_generator import AuditReportGenerator
+from app.services.parser import CONTRACT_TYPES, DocumentParserService
+from app.services.report_generator import AuditReportGenerator, summarize_findings
 from app.agents.graph import create_compliance_graph
 from app.agents.nodes import auditor_node, critic_node
 
@@ -116,7 +114,9 @@ def get_compiled_graph():
 
 history = st.session_state["audit_history"]
 completed_audits = [item for item in history if item["status"] == "Passed"]
-failed_audits = [item for item in history if item["status"] == "Failed"]
+failed_audits = [
+    item for item in history if item["status"] in {"Failed", "Incomplete"}
+]
 total_completed = len(completed_audits)
 total_rules_checked = sum(item["rules_count"] for item in completed_audits)
 avg_time_saved = (
@@ -217,7 +217,10 @@ if st.session_state["active_tab"] == "Dashboard":
     with col2:
         with st.container(border=True):
             st.markdown("### Compliance Rules")
-            st.caption("One rule per line. Clears automatically on page refresh.")
+            st.caption(
+                "One complete rule per line; commas and AND/OR clauses stay together. "
+                "Clears automatically on page refresh."
+            )
             rules_input = st.text_area(
                 "Compliance Rules",
                 value=st.session_state["rules_draft"],
@@ -227,115 +230,241 @@ if st.session_state["active_tab"] == "Dashboard":
             )
             st.session_state["rules_draft"] = rules_input
 
+    file_bytes = uploaded_file.getvalue() if uploaded_file else b""
+    full_text = ""
+    contract_pages = []
+    parse_error = None
+    detected_type = None
+    selected_contract_type = "Select contract type..."
+    if file_bytes:
+        try:
+            contract_pages = DocumentParserService.extract_pdf_pages(file_bytes)
+            full_text = DocumentParserService.format_pdf_pages(contract_pages)
+            detected_type = DocumentParserService.classify_contract_type(full_text)
+        except Exception as error:
+            parse_error = str(error)
+            st.error(f"Could not read the uploaded PDF: {parse_error}")
+        type_options = ["Select contract type..."] + list(CONTRACT_TYPES)
+        if detected_type:
+            st.info(
+                f"Suggested contract type: **{detected_type}**. "
+                "Confirm or change it before auditing."
+            )
+            initial_type_index = type_options.index(detected_type)
+        else:
+            st.warning(
+                "Contract type could not be confidently identified. Select the "
+                "correct type before running the audit."
+            )
+            initial_type_index = 0
+        selected_contract_type = st.selectbox(
+            "Contract type",
+            type_options,
+            index=initial_type_index,
+            key=(
+                f"contract_type_selector_{st.session_state['uploader_key']}_"
+                f"{uploaded_file.name}"
+            ),
+        )
+
+    input_rules = [
+        line.strip()
+        for line in rules_input.replace("\r\n", "\n").split("\n")
+        if line.strip()
+    ]
+    effective_type = (
+        selected_contract_type
+        if selected_contract_type != "Select contract type..."
+        else None
+    )
+    rules_to_exclude = DocumentParserService.mismatched_rules(
+        effective_type, input_rules
+    )
+    alignment_warning = DocumentParserService.rule_alignment_warning(
+        effective_type, input_rules
+    )
+    uploaded_name = uploaded_file.name if uploaded_file else "no-file"
+    if rules_to_exclude:
+        st.warning(alignment_warning)
+        rule_handling = st.radio(
+            "Remove these rules or run anyway?",
+            ("Run all rules anyway", "Remove potentially inapplicable rules"),
+            horizontal=True,
+            key=(
+                f"rule_handling_{st.session_state['uploader_key']}_"
+                f"{uploaded_name}"
+            ),
+        )
+    else:
+        rule_handling = "Run all rules anyway"
+    parsed_rules = input_rules
+    if rule_handling == "Remove potentially inapplicable rules":
+        parsed_rules = [rule for rule in input_rules if rule not in rules_to_exclude]
+    st.caption(f"{len(parsed_rules)} rule(s) will be audited.")
+
     st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
     if st.button("⚡ Compile and Audit Contract", type="primary", use_container_width=True):
         if not uploaded_file:
             st.warning("Please upload a Contract PDF first.")
         elif not rules_input.strip():
             st.warning("Please enter at least one compliance rule.")
+        elif parse_error:
+            st.error(f"Could not read the uploaded PDF: {parse_error}")
+        elif not full_text.strip():
+            st.error("No readable text found inside this PDF.")
+        elif selected_contract_type == "Select contract type...":
+            st.warning("Select a contract type before running the audit.")
+        elif not parsed_rules:
+            st.warning("No rules remain after filtering; add or restore rules.")
         else:
             start_ts = time.time()
             with st.spinner(
                 "Multi-Agent Pipeline Active: Extracting clauses, verifying citations "
-                "via Gemini, and compiling your report..."
+                "via OpenRouter, and compiling your report..."
             ):
                 try:
-                    file_bytes = uploaded_file.getvalue()
-                    reader = PdfReader(io.BytesIO(file_bytes))
-                    pages_text = []
-                    for page_index, page in enumerate(reader.pages):
-                        page_text = page.extract_text() or ""
-                        if page_text.strip():
-                            pages_text.append(
-                                f"--- PAGE {page_index + 1} ---\n{page_text.strip()}"
-                            )
-                    full_text = "\n\n".join(pages_text)
+                    # The audit runs on the full contract text, so the optional
+                    # Qdrant/embedding indexing step is intentionally skipped here:
+                    # an unavailable embedding provider must never stall the audit.
+                    initial_state = {
+                        "contract_text": full_text[:35000],
+                        "source_contract_text": full_text,
+                        "retrieval_context": full_text[:35000],
+                        "compliance_rules": parsed_rules,
+                        "contract_type": selected_contract_type,
+                        "rule_alignment_warning": alignment_warning,
+                        "total_pages": len(contract_pages),
+                        "audit_report": {},
+                        "critic_feedback": "",
+                        "citation_review_executed": False,
+                        "citation_review_status": "NOT RUN",
+                        "citation_review_detail": "",
+                        "verified_citations": 0,
+                        "total_citations": 0,
+                        "model_used": "",
+                        "ai_error": None,
+                        "loop_count": 0,
+                        "status": "pending",
+                    }
 
-                    if not full_text.strip():
-                        st.error("No readable text found inside this PDF.")
-                    else:
-                        try:
-                            from app.services.vector_db import VectorStoreService
+                    final_state = dict(initial_state)
+                    for output in get_compiled_graph().stream(initial_state):
+                        for state_update in output.values():
+                            final_state.update(state_update)
 
-                            vector_store = VectorStoreService()
-                            chunks = DocumentParserService.extract_and_chunk_pdf(file_bytes)
-                            if chunks:
-                                vector_store.index_chunks(str(uuid.uuid4()), chunks)
-                        except Exception as error:
-                            st.warning(
-                                f"Optional vector indexing was skipped: {error}"
-                            )
-
-                        parsed_rules = [
-                            line.strip()
-                            for line in rules_input.replace("\r\n", "\n").split("\n")
-                            if line.strip()
-                        ]
-                        initial_state = {
-                            "contract_text": full_text[:35000],
-                            "compliance_rules": parsed_rules,
-                            "audit_report": {},
-                            "critic_feedback": "",
-                            "citation_review_status": "",
-                            "verified_citations": 0,
-                            "model_used": "",
-                            "ai_error": None,
-                            "loop_count": 0,
-                            "status": "pending",
-                        }
-
-                        final_state = dict(initial_state)
-                        for output in get_compiled_graph().stream(initial_state):
-                            for state_update in output.values():
-                                final_state.update(state_update)
-
+                    report_name = f"VERITAS_REPORT_{uploaded_file.name}"
+                    pdf_bytes = None
+                    report_path = None
+                    try:
                         report_path = f"/tmp/VERITAS_REPORT_{uuid.uuid4()}.pdf"
                         AuditReportGenerator.generate_pdf_report(
                             report_path, uploaded_file.name, final_state
                         )
                         with open(report_path, "rb") as pdf_file:
                             pdf_bytes = pdf_file.read()
+                    except Exception as pdf_error:
+                        # Findings are still valuable even if PDF layout fails.
+                        st.warning(
+                            "The audit completed, but the PDF report could not be "
+                            f"generated: {pdf_error}"
+                        )
+                    finally:
+                        if report_path:
+                            try:
+                                os.remove(report_path)
+                            except OSError:
+                                pass
 
-                        elapsed = round(time.time() - start_ts, 1)
-                        ai_error = final_state.get("ai_error")
-                        findings = final_state.get("audit_report", {}).get("findings", [])
-                        compliant_count = sum(
-                            finding.get("result", "").lower() == "compliant"
-                            for finding in findings
-                        )
-                        verified_count = final_state.get("verified_citations", 0)
-                        audit_passed = (
-                            not ai_error and final_state.get("status") == "pass"
-                        )
-                        failure_reason = (
-                            ai_error
-                            or final_state.get("critic_feedback")
-                            or f"Audit ended with status: {final_state.get('status', 'unknown')}"
-                        )
-                        record = {
-                            "id": f"AUD-{len(history) + 101}",
-                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "document": uploaded_file.name,
-                            "status": "Passed" if audit_passed else "Failed",
-                            "failure_reason": "None — all checks completed"
+                    elapsed = round(time.time() - start_ts, 1)
+                    ai_error = final_state.get("ai_error")
+                    report_payload = final_state.get("audit_report") or {}
+                    findings = [
+                        item
+                        for item in (report_payload.get("findings") or [])
+                        if isinstance(item, dict)
+                    ]
+                    compliant_count = sum(
+                        finding.get("result", "").lower() == "compliant"
+                        for finding in findings
+                    )
+                    verified_count = final_state.get("verified_citations", 0)
+                    audit_passed = (
+                        not ai_error
+                        and final_state.get("status") == "pass"
+                        and final_state.get("citation_review_executed") is True
+                        and final_state.get("citation_review_status") == "PASS"
+                    )
+                    if not audit_passed:
+                        findings = []
+                    failure_reason = (
+                        ai_error
+                        or final_state.get("critic_feedback")
+                        or f"Audit ended with status: {final_state.get('status', 'unknown')}"
+                    )
+                    record = {
+                        "id": f"AUD-{len(history) + 101}",
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "document": uploaded_file.name,
+                        "contract_type": selected_contract_type,
+                        "status": (
+                            "Passed"
                             if audit_passed
-                            else failure_reason,
-                            "model": final_state.get("model_used", "NONE"),
-                            "rules": parsed_rules,
-                            "rules_count": len(parsed_rules),
-                            "compliant_count": compliant_count,
-                            "verified_citations": verified_count,
-                            "total_citations": len(findings),
-                            "duration_sec": elapsed,
-                            "pdf_bytes": pdf_bytes,
-                            "report_name": f"VERITAS_REPORT_{uploaded_file.name}",
-                        }
-                        st.session_state["audit_history"].insert(0, record)
-                        st.session_state["latest_report"] = record
-                        st.session_state["uploader_key"] += 1
-                        st.rerun()
+                            else (
+                                "Incomplete"
+                                if final_state.get("status") == "incomplete"
+                                else "Failed"
+                            )
+                        ),
+                        "failure_reason": "None — all checks completed"
+                        if audit_passed
+                        else failure_reason,
+                        "model": final_state.get("model_used", "NONE"),
+                        "findings": findings,
+                        "summary": summarize_findings(findings),
+                        "rule_alignment_warning": alignment_warning,
+                        "citation_review_executed": bool(
+                            final_state.get("citation_review_executed")
+                        ),
+                        "citation_review_status": final_state.get(
+                            "citation_review_status", "NOT RUN"
+                        ),
+                        "citation_review_detail": final_state.get(
+                            "citation_review_detail", ""
+                        ),
+                        "rules": parsed_rules,
+                        "rules_count": len(parsed_rules),
+                        "compliant_count": compliant_count,
+                        "verified_citations": verified_count,
+                        "total_citations": final_state.get(
+                            "total_citations",
+                            sum(
+                                1
+                                for finding in findings
+                                if not str(finding.get("result", ""))
+                                .lower()
+                                .startswith("gap")
+                                and finding.get("citation")
+                            ),
+                        ),
+                        "duration_sec": elapsed,
+                        "pdf_bytes": pdf_bytes,
+                        "report_name": report_name,
+                    }
+                    st.session_state["audit_history"].insert(0, record)
+                    st.session_state["latest_report"] = record
+                    st.session_state["uploader_key"] += 1
+
+                    if ai_error:
+                        st.error(f"Automated audit could not be completed: {ai_error}")
+                    elif not findings:
+                        st.error(
+                            "Citation or rule-coverage verification did not pass. "
+                            "The report contains no findings; manual review is required."
+                        )
+                    st.rerun()
                 except Exception as error:
-                    st.error(f"Pipeline execution error: {error}")
+                    st.error(f"Pipeline execution error: {error!r}")
+                    st.exception(error)
 
     if "latest_report" in st.session_state:
         latest = st.session_state["latest_report"]
@@ -344,20 +473,97 @@ if st.session_state["active_tab"] == "Dashboard":
                 f"⚠️ Audit Failed for {latest['document']} — "
                 f"Cause: {latest['failure_reason']}"
             )
+        elif latest["status"] == "Incomplete":
+            st.warning(
+                f"⚠️ Audit INCOMPLETE for {latest['document']} — "
+                f"{latest['failure_reason']}"
+            )
         else:
             st.success(
                 f"✅ Audit Complete for {latest['document']} "
                 f"({latest['compliant_count']}/{latest['rules_count']} rules "
                 f"compliant in {latest['duration_sec']}s)"
             )
-        st.download_button(
-            label=f"📥 Download {latest['report_name']}",
-            data=latest["pdf_bytes"],
-            file_name=latest["report_name"],
-            mime="application/pdf",
-            key="latest_dl_btn",
-            use_container_width=True,
-        )
+
+        if latest.get("rule_alignment_warning"):
+            st.warning(latest["rule_alignment_warning"])
+
+        if latest.get("findings"):
+            summary = latest.get("summary") or summarize_findings(latest["findings"])
+            verified = (
+                latest.get("citation_review_executed") is True
+                and latest.get("citation_review_status") == "PASS"
+            )
+            with st.container(border=True):
+                st.markdown("### Executive summary")
+                st.markdown(
+                    f"**RECOMMENDATION:** {summary['recommendation']}"
+                    if verified
+                    else "**RECOMMENDATION:** MANUAL REVIEW REQUIRED — automated "
+                    "verification is incomplete"
+                )
+                st.markdown(f"**RISK SUMMARY:** {summary['risk_summary']}")
+                st.markdown(f"**KEY ISSUE:** {summary['key_issue']}")
+                st.markdown(f"**NEXT STEP:** {summary['next_step']}")
+                st.caption(
+                    f"Contract type: {latest.get('contract_type') or 'Unclassified'} "
+                    f"• Citation review: {latest.get('citation_review_status') or 'NOT RUN'}"
+                    f" — {latest.get('citation_review_detail') or 'no detail recorded'}"
+                )
+
+            st.markdown("#### Rule-by-rule findings")
+            st.dataframe(
+                [
+                    {
+                        "Rule": item.get("rule", ""),
+                        "Result": (
+                            item.get("result", "")
+                            if verified or item.get("result") == "Compliant"
+                            else f"UNVERIFIED — {item.get('result', '')}"
+                        ),
+                        "Priority": item.get("priority", ""),
+                        "Risk if missing": item.get("risk_if_missing") or "—",
+                        "Confidence": item.get("confidence", ""),
+                        "Why": item.get("confidence_reason", ""),
+                        "Citation": (
+                            "\n".join(
+                                f"{source.get('quote', '')} (Page {source.get('page')})"
+                                for source in item.get("citations", [])
+                                if isinstance(source, dict)
+                            )
+                            if item.get("citations")
+                            else (
+                                f"{item.get('citation') or '—'}"
+                                + (
+                                    f" ({item['source_reference']})"
+                                    if item.get("source_reference")
+                                    else ""
+                                )
+                            )
+                        ),
+                        "Reasoning": item.get("reasoning", ""),
+                        "Next step": item.get("next_step", ""),
+                    }
+                    for item in latest["findings"]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        if latest.get("pdf_bytes"):
+            st.download_button(
+                label=f"📥 Download {latest['report_name']}",
+                data=latest["pdf_bytes"],
+                file_name=latest["report_name"],
+                mime="application/pdf",
+                key="latest_dl_btn",
+                use_container_width=True,
+            )
+        else:
+            st.info(
+                "The PDF report could not be generated for this run. The findings "
+                "shown above are complete and were saved to Audit History."
+            )
 
 elif st.session_state["active_tab"] == "Audit History":
     st.markdown("## 📜 Audit History")
@@ -386,6 +592,8 @@ elif st.session_state["active_tab"] == "Audit History":
                             f"✅ PASSED ({item['compliant_count']}/"
                             f"{item['rules_count']} Compliant)"
                         )
+                    elif item["status"] == "Incomplete":
+                        st.warning("⚠️ INCOMPLETE")
                     else:
                         st.error("❌ FAILED")
                 with col3:

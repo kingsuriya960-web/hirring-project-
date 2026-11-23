@@ -230,9 +230,17 @@ Governing law must be Delaware.</textarea>
                 const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
                 const filename = filenameMatch ? filenameMatch[1] : `COMPLIANCE_AUDIT_${selectedFile.name.replace(/\.pdf$/i, "")}.pdf`;
                 const counts = JSON.parse(response.headers.get("x-finding-counts") || "{}");
+                const analysisStatus = response.headers.get("x-analysis-status") || "verified";
                 updateSessionStats((performance.now() - startedAt) / 1000, counts);
                 downloadReport(blob, filename);
-                showBanner("Audit complete! Your compliance report PDF has downloaded.", "success");
+                if (analysisStatus === "incomplete") {
+                    showBanner(
+                        "Audit completed with INCOMPLETE verification. Every finding in the downloaded PDF is watermarked UNVERIFIED — manual review is required.",
+                        "error"
+                    );
+                } else {
+                    showBanner("Audit complete! Your compliance report PDF has downloaded.", "success");
+                }
             } catch (error) {
                 showBanner(error instanceof Error ? error.message : "The audit failed unexpectedly.", "error");
             } finally {
