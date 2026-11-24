@@ -6,6 +6,7 @@ services:
     volumes:
       - ./app:/code/app
     environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - QDRANT_HOST=qdrant
@@ -19,6 +20,7 @@ services:
     volumes:
       - ./app:/code/app
     environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - QDRANT_HOST=qdrant

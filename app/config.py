@@ -2,6 +2,8 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    GROQ_API_KEY: str | None = None
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
     GEMINI_API_KEY: str | None = None
     GOOGLE_API_KEY: str | None = None
     GEMINI_MODEL: str = "gemini/gemini-3.8-flash"

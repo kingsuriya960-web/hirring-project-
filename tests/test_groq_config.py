@@ -33,7 +33,8 @@ def test_model_not_found_skips_retries_and_tries_the_next_model(monkeypatch):
     client = SimpleNamespace(
         chat=SimpleNamespace(completions=FakeCompletions())
     )
-    monkeypatch.setattr(nodes, "_get_client", lambda: client)
+    monkeypatch.setattr(nodes, "get_groq_api_key", lambda required=False: "gsk_test")
+    monkeypatch.setattr(nodes, "OpenAI", lambda **kwargs: client)
     monkeypatch.setattr(nodes.time, "sleep", lambda _: None)
 
     parsed, used_model = nodes._call_groq_with_retry("prompt")

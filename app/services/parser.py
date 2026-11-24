@@ -3,6 +3,7 @@ import io
 
 
 CONTRACT_TYPES = (
+    "IT / Managed Services Agreement",
     "Consulting Agreement",
     "SaaS / Subscription Agreement",
     "Vendor / Supply Agreement",
@@ -11,6 +12,13 @@ CONTRACT_TYPES = (
 )
 
 _CONTRACT_TYPE_SIGNALS = {
+    "IT / Managed Services Agreement": (
+        "managed services",
+        "master services agreement",
+        "it services",
+        "service desk",
+        "infrastructure services",
+    ),
     "Consulting Agreement": (
         "consulting agreement",
         "consultant",
@@ -48,6 +56,19 @@ _CONTRACT_TYPE_SIGNALS = {
 }
 
 _RULE_RELEVANCE_HINTS = {
+    "IT / Managed Services Agreement": (
+        (
+            "landlord",
+            "tenant",
+            "leased premises",
+            "monthly rent",
+            "bill of sale",
+            "delivery of goods",
+        ),
+        "IT/managed services agreements usually address SLAs, security incident "
+        "notification, data protection, liability caps, payment terms, and "
+        "termination.",
+    ),
     "Consulting Agreement": (
         (
             "breach notification",
@@ -107,6 +128,12 @@ _RULE_RELEVANCE_HINTS = {
 }
 
 _CONTRACT_TYPE_TITLE_SIGNALS = {
+    "IT / Managed Services Agreement": (
+        "managed services agreement",
+        "master services agreement",
+        "it services agreement",
+        "it managed services agreement",
+    ),
     "Consulting Agreement": ("consulting agreement", "consultancy agreement"),
     "SaaS / Subscription Agreement": (
         "saas agreement",
@@ -210,13 +237,13 @@ class DocumentParserService:
         return "\n\n".join(pages_text)
 
     @staticmethod
-    def extract_and_chunk_pdf(file_bytes: bytes, child_size: int = 400, parent_size: int = 2000) -> list[dict]:
-        reader = PdfReader(io.BytesIO(file_bytes))
+    def chunk_pages(pages: list[dict], child_size: int = 400, parent_size: int = 2000) -> list[dict]:
         processed_chunks = []
         parent_step = max(parent_size - 400, 1)
 
-        for page_idx, page in enumerate(reader.pages):
-            page_text = page.extract_text() or ""
+        for page in pages or []:
+            page_text = str(page.get("text") or "")
+            page_number = int(page.get("page", 1))
             if not page_text.strip():
                 continue
 
@@ -228,6 +255,15 @@ class DocumentParserService:
                         processed_chunks.append({
                             "child_text": child_chunk.strip(),
                             "parent_text": parent_chunk.strip(),
-                            "page": page_idx + 1,
+                            "page": page_number,
                         })
         return processed_chunks
+
+    @staticmethod
+    def extract_and_chunk_pdf(file_bytes: bytes, child_size: int = 400, parent_size: int = 2000) -> list[dict]:
+        reader = PdfReader(io.BytesIO(file_bytes))
+        pages = [
+            {"page": page_idx + 1, "text": page.extract_text() or ""}
+            for page_idx, page in enumerate(reader.pages)
+        ]
+        return DocumentParserService.chunk_pages(pages, child_size, parent_size)

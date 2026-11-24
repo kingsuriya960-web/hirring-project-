@@ -602,3 +602,84 @@ def test_langgraph_uses_gemini_for_auditor_and_critic(monkeypatch):
     assert final_state["critic_mode"] == "gemini"
     assert final_state["status"] == "pass"
     assert final_state["audit_report"]["findings"][0]["source_reference"] == "Page 1"
+
+
+def test_paraphrased_payment_clause_uses_word_number_not_section_number():
+    contract = (
+        "CONSULTING AGREEMENT\n"
+        "1. Fees and Payment\n"
+        "Customer will pay each undisputed invoice within thirty days after the "
+        "invoice date."
+    )
+    rule = "Payment terms must be Net-30 or better across all tiers."
+    assert "net-30" not in contract.lower()
+
+    findings = _evaluate_rules_heuristically(contract, [rule])
+
+    assert findings[0]["compliant"] is True
+    assert "30 days <= 30 days" in findings[0]["reason"]
+    assert "1 days" not in findings[0]["reason"]
+    assert "thirty days" in findings[0]["citation"]
+
+
+def test_repeated_graph_runs_do_not_reuse_cached_auditor_output(monkeypatch):
+    import app.agents.nodes as nodes
+    from app.agents.nodes import gatekeeper_node
+
+    monkeypatch.delenv("MOCK_LLM", raising=False)
+    rule = "Payment terms must be Net-30 or better."
+    contract = "Invoices are due within 30 days."
+    calls = {"auditor": 0}
+
+    def fake_completion(prompt, max_retries=3):
+        if "Senior Legal Quality Controller" in prompt:
+            return (
+                {"status": "pass", "verified_count": 1, "feedback": "ok"},
+                "groq/test-model",
+            )
+        calls["auditor"] += 1
+        result = "Compliant" if calls["auditor"] == 1 else "Non-Compliant"
+        return (
+            {
+                "findings": [
+                    {
+                        "rule": rule,
+                        "result": result,
+                        "priority": "High",
+                        "citation_sentence_ids": ["P1-S1"],
+                        "reasoning": f"Run {calls['auditor']} verdict: {result}.",
+                        "confidence": "High",
+                        "confidence_reason": "Exact payment clause.",
+                    }
+                ]
+            },
+            "groq/test-model",
+        )
+
+    monkeypatch.setattr(nodes, "_call_groq_with_retry", fake_completion)
+    graph = create_compliance_graph(auditor_node, critic_node, gatekeeper_node)
+    state = {
+        "contract_text": contract,
+        "source_contract_text": contract,
+        "source_pages": [{"page": 1, "text": contract}],
+        "total_pages": 1,
+        "compliance_rules": [rule],
+        "audit_report": {},
+        "critic_feedback": "",
+        "loop_count": 0,
+        "status": "pending",
+        "budget_limit": 0.10,
+        "estimated_cost": 0.0,
+        "total_tokens": 0,
+        "cost_breakdown": [],
+    }
+
+    first = graph.invoke(dict(state))
+    second = graph.invoke(dict(state))
+
+    first_finding = first["audit_report"]["findings"][0]
+    second_finding = second["audit_report"]["findings"][0]
+    assert first_finding["result"] == "Compliant"
+    assert second_finding["result"] == "Non-Compliant"
+    assert first_finding["reasoning"] != second_finding["reasoning"]
+    assert calls["auditor"] == 2

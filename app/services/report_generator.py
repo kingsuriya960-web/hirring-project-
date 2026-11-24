@@ -1,4 +1,6 @@
 import html
+from pathlib import Path
+
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -23,6 +25,10 @@ def summarize_findings(findings: list[dict]) -> dict:
         1 for item in items if str(item.get("priority", "")).lower() == "critical"
     )
     high = sum(1 for item in items if str(item.get("priority", "")).lower() == "high")
+    medium = sum(
+        1 for item in items if str(item.get("priority", "")).lower() == "medium"
+    )
+    low = sum(1 for item in items if str(item.get("priority", "")).lower() == "low")
 
     if critical or non_compliant:
         recommendation = "DO NOT EXECUTE without legal review"
@@ -31,29 +37,49 @@ def summarize_findings(findings: list[dict]) -> dict:
     else:
         recommendation = "APPROVED"
 
+    problem_items = [
+        item
+        for item in items
+        if str(item.get("result", "")).lower() != "compliant"
+    ]
     worst = min(
-        items,
+        problem_items,
         key=lambda item: SEVERITY_ORDER.get(
             str(item.get("priority", "low")).lower(), 4
         ),
         default={},
     )
-    key_issue = str(
-        worst.get("risk_if_missing")
-        or worst.get("reasoning")
-        or worst.get("rule")
-        or "No findings were produced."
+    key_issue = (
+        str(
+            worst.get("risk_if_missing")
+            or worst.get("reasoning")
+            or worst.get("rule")
+            or "No findings were produced."
+        )
+        if worst
+        else ""
     )
-    next_step = str(
-        worst.get("next_step") or "Have qualified counsel review the agreement."
+    status_note = (
+        ""
+        if worst
+        else "No blocking issues found; all rules are compliant."
+    )
+    next_step = (
+        str(worst.get("next_step") or "Have qualified counsel review the agreement.")
+        if worst
+        else "Proceed with standard legal review."
     )
     return {
         "recommendation": recommendation,
+        "verdict_summary": (
+            f"{compliant} compliant, {non_compliant} non-compliant, "
+            f"{gap} missing-protection gaps."
+        ),
         "risk_summary": (
-            f"{critical} critical, {high} high, {compliant} compliant; "
-            f"{gap} missing-protection gaps and {non_compliant} non-compliant findings."
+            f"{critical} critical, {high} high, {medium} medium, {low} low."
         ),
         "key_issue": key_issue,
+        "status_note": status_note,
         "next_step": next_step,
         "counts": {
             "rules": len(items),
@@ -62,13 +88,153 @@ def summarize_findings(findings: list[dict]) -> dict:
             "gap": gap,
             "critical": critical,
             "high": high,
+            "medium": medium,
+            "low": low,
         },
     }
 
 
 class AuditReportGenerator:
     @staticmethod
-    def generate_pdf_report(filename: str, document_name: str, final_state: dict) -> str:
+    def _blocked_pdf_bytes(filename: str, document_name: str, final_state: dict) -> bytes:
+        doc = SimpleDocTemplate(filename, pagesize=landscape(letter))
+        styles = getSampleStyleSheet()
+        story = [
+            Paragraph("VERITAS COMPLIANCE — ENTERPRISE AUDIT REPORT", styles["Heading1"]),
+            Paragraph(f"<b>Document Audited:</b> {html.escape(str(document_name))}", styles["BodyText"]),
+            Spacer(1, 10),
+            Paragraph(
+                "<b>ANALYSIS STATUS: BLOCKED</b><br/>"
+                "The document was not analyzed because a prompt-injection guardrail "
+                "blocked the run. No findings are presented. Manual review is required.",
+                styles["BodyText"],
+            ),
+        ]
+        doc.build(story)
+        return Path(filename).read_bytes()
+
+    @staticmethod
+    def _legacy_pdf_bytes(filename: str, document_name: str, final_state: dict) -> bytes:
+        doc = SimpleDocTemplate(
+            filename,
+            pagesize=landscape(letter),
+            rightMargin=30,
+            leftMargin=30,
+            topMargin=30,
+            bottomMargin=30,
+        )
+        styles = getSampleStyleSheet()
+        story = [
+            Paragraph("VERITAS COMPLIANCE — ENTERPRISE AUDIT REPORT", styles["Heading1"]),
+            Paragraph(f"<b>Document Audited:</b> {html.escape(str(document_name))}", styles["BodyText"]),
+        ]
+        findings = [
+            item
+            for item in (final_state.get("findings") or [])
+            if isinstance(item, dict)
+        ]
+        compliant = sum(1 for item in findings if item.get("compliant") is True)
+        non_compliant = sum(1 for item in findings if item.get("compliant") is False)
+        undetermined = sum(1 for item in findings if item.get("compliant") is None)
+
+        analysis = final_state.get("analysis") or {}
+        mode = analysis.get("mode") if isinstance(analysis, dict) else None
+        method = (
+            "Gemini (multi-agent LangGraph pipeline)"
+            if mode == "gemini"
+            else str(mode or "Automated multi-agent LangGraph pipeline")
+        )
+        story.append(Paragraph(f"<b>Analysis method:</b> {html.escape(method)}", styles["BodyText"]))
+
+        citation_review = final_state.get("citation_review") or {}
+        if isinstance(citation_review, dict) and citation_review.get("status") == "verified":
+            reviewed = int(citation_review.get("citations_reviewed") or 0)
+            verified = int(citation_review.get("citations_verified") or 0)
+            story.append(
+                Paragraph(
+                    f"<b>Citation review:</b> {verified}/{reviewed} cited excerpts verified",
+                    styles["BodyText"],
+                )
+            )
+
+        story.append(
+            Paragraph(
+                f"<b>Rules reviewed:</b> {len(findings)} | "
+                f"<b>Compliant:</b> {compliant} | "
+                f"<b>Non-compliant:</b> {non_compliant} | "
+                f"<b>Undetermined:</b> {undetermined}",
+                styles["BodyText"],
+            )
+        )
+        story.append(Spacer(1, 10))
+
+        table_data = [[
+            "Compliance rule",
+            "Result",
+            "Citation",
+            "Source",
+            "Reasoning",
+            "Next step",
+        ]]
+        for item in findings:
+            value = item.get("compliant")
+            result = (
+                "Compliant"
+                if value is True
+                else "Non-compliant"
+                if value is False
+                else "Undetermined"
+            )
+            table_data.append([
+                Paragraph(html.escape(str(item.get("rule") or "")), styles["BodyText"]),
+                Paragraph(result, styles["BodyText"]),
+                Paragraph(html.escape(str(item.get("citation") or "")), styles["BodyText"]),
+                Paragraph(html.escape(str(item.get("source_reference") or "")), styles["BodyText"]),
+                Paragraph(html.escape(str(item.get("reason") or "")), styles["BodyText"]),
+                Paragraph(html.escape(str(item.get("next_step") or "")), styles["BodyText"]),
+            ])
+        table = Table(table_data, colWidths=[130, 80, 170, 100, 170, 130], repeatRows=1)
+        table.setStyle(
+            TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E293B")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+            ])
+        )
+        story.append(table)
+        doc.build(story)
+        return Path(filename).read_bytes()
+
+    @staticmethod
+    def generate_pdf_report(
+        filename: str,
+        document_name: str | None = None,
+        final_state: dict | None = None,
+    ) -> bytes:
+        if final_state is None and isinstance(document_name, dict):
+            final_state = document_name
+            document_name = Path(filename).name
+        final_state = final_state or {}
+        document_name = document_name or Path(filename).name
+
+        analysis = final_state.get("analysis")
+        if isinstance(analysis, dict) and analysis.get("mode") == "heuristic_fallback":
+            raise ValueError(
+                "A compliance report cannot be generated from heuristic fallback findings."
+            )
+        if final_state.get("guardrail_status") == "blocked":
+            return AuditReportGenerator._blocked_pdf_bytes(
+                filename, document_name, final_state
+            )
+        if "audit_report" not in final_state and any(
+            key in final_state
+            for key in ("findings", "analysis", "citation_review", "compliance_status")
+        ):
+            return AuditReportGenerator._legacy_pdf_bytes(
+                filename, document_name, final_state
+            )
+
         doc = SimpleDocTemplate(
             filename,
             pagesize=landscape(letter),
@@ -171,7 +337,7 @@ class AuditReportGenerator:
             )
             story.append(Paragraph(banner_text, error_style))
             doc.build(story)
-            return filename
+            return Path(filename).read_bytes()
 
         if not citation_review_passed:
             citation_error = (
@@ -194,7 +360,7 @@ class AuditReportGenerator:
                 )
             )
             doc.build(story)
-            return filename
+            return Path(filename).read_bytes()
 
         audit_report = final_state.get("audit_report") or {}
         if not isinstance(audit_report, dict):
@@ -211,9 +377,25 @@ class AuditReportGenerator:
             )
             story.append(Paragraph(banner_text, error_style))
             doc.build(story)
-            return filename
+            return Path(filename).read_bytes()
 
-        model_used = html.escape(str(final_state.get("model_used") or "OpenRouter Free"))
+        model_used_raw = str(final_state.get("model_used") or "").strip()
+        report_analysis = (
+            (final_state.get("audit_report") or {}).get("analysis")
+            if isinstance(final_state.get("audit_report"), dict)
+            else {}
+        )
+        analysis_mode = str(
+            report_analysis.get("mode")
+            if isinstance(report_analysis, dict)
+            else ""
+        ).lower()
+        model_lower = model_used_raw.lower()
+        analysis_is_ai = bool(model_used_raw) and not any(
+            marker in model_lower
+            for marker in ("local heuristic", "heuristic", "fallback", "none")
+        ) and analysis_mode != "heuristic_fallback"
+        model_used = html.escape(model_used_raw or "Unknown")
         citation_status = (
             "PASS"
             if citation_review_passed
@@ -246,6 +428,12 @@ class AuditReportGenerator:
         high_cnt = sum(
             1 for f in findings if str(f.get("priority", "")).lower() == "high"
         )
+        medium_cnt = sum(
+            1 for f in findings if str(f.get("priority", "")).lower() == "medium"
+        )
+        low_cnt = sum(
+            1 for f in findings if str(f.get("priority", "")).lower() == "low"
+        )
         if critical_cnt or non_compliant_cnt:
             recommendation = "DO NOT EXECUTE without legal review"
         elif high_cnt or gap_cnt:
@@ -256,44 +444,73 @@ class AuditReportGenerator:
             recommendation = (
                 "MANUAL REVIEW REQUIRED — automated verification is incomplete"
             )
+        if not analysis_is_ai:
+            recommendation = (
+                "MANUAL REVIEW REQUIRED — local fallback only, not AI analysis"
+            )
 
         severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        problem_findings = [
+            finding
+            for finding in findings
+            if str(finding.get("result", "")).lower() != "compliant"
+        ]
         worst_finding = min(
-            findings,
+            problem_findings,
             key=lambda f: severity_order.get(
                 str(f.get("priority", "low")).lower(), 4
             ),
             default={},
         )
-        key_issue = (
-            str(
+        if worst_finding:
+            key_issue = str(
                 worst_finding.get("risk_if_missing")
                 or worst_finding.get("reasoning")
                 or worst_finding.get("rule")
                 or "No findings were produced."
             )
-            if worst_finding
-            else "No findings were produced."
-        )
-        next_step = (
-            str(worst_finding.get("next_step") or "Refer findings to qualified counsel.")
-            if worst_finding
-            else "Have qualified counsel review the agreement."
-        )
+            next_step = str(
+                worst_finding.get("next_step")
+                or "Refer findings to qualified counsel."
+            )
+            issue_label = "KEY ISSUE"
+        else:
+            key_issue = "No blocking issues found; all rules are compliant."
+            next_step = "Proceed with standard legal review."
+            issue_label = "STATUS NOTE"
+        if not analysis_is_ai:
+            story.append(
+                Paragraph(
+                    "<b>AI ANALYSIS UNAVAILABLE — this report was NOT generated "
+                    "by the compliance AI.</b><br/>"
+                    "The results below come from the deterministic keyword/rule "
+                    "fallback. They are not an AI legal review, have not been "
+                    "endorsed by an AI model, and must be manually verified.",
+                    error_style,
+                )
+            )
+            story.append(Spacer(1, 8))
         summary_text = (
             f"<b>RECOMMENDATION:</b> {html.escape(recommendation)}.<br/>"
-            f"<b>RISK SUMMARY:</b> {critical_cnt} critical, {high_cnt} high, "
-            f"{compliant_cnt} compliant; {gap_cnt} missing-protection gaps and "
-            f"{non_compliant_cnt} non-compliant findings.<br/>"
-            f"<b>KEY ISSUE:</b> {html.escape(key_issue)}<br/>"
+            f"<b>VERDICT SUMMARY:</b> {compliant_cnt} compliant, "
+            f"{non_compliant_cnt} non-compliant, {gap_cnt} missing-protection gaps.<br/>"
+            f"<b>RISK SEVERITY:</b> {critical_cnt} critical, {high_cnt} high, "
+            f"{medium_cnt} medium, {low_cnt} low.<br/>"
+            f"<b>{issue_label}:</b> {html.escape(key_issue)}<br/>"
             f"<b>NEXT STEP:</b> {html.escape(next_step)}"
         )
         story.append(Paragraph(summary_text, meta_style))
         story.append(Spacer(1, 8))
+        if not analysis_is_ai:
+            analysis_badge = "FALLBACK — NOT AI-VERIFIED"
+        elif citation_review_passed:
+            analysis_badge = "AI-VERIFIED"
+        else:
+            analysis_badge = "AI-UNVERIFIED"
         story.append(
             Paragraph(
-                f"<b>Analysis method:</b> {model_used} (multi-agent LangGraph pipeline) "
-                f"[{'VERIFIED' if citation_review_passed else 'UNVERIFIED'}]",
+                f"<b>Analysis method:</b> {model_used} "
+                f"(multi-agent LangGraph pipeline) [{analysis_badge}]",
                 meta_style,
             )
         )
@@ -305,12 +522,14 @@ class AuditReportGenerator:
             )
         )
         if citation_review_passed and total_citations:
-            story.append(
-                Paragraph(
-                    "<b>All citations exactly match contract text.</b>",
-                    meta_style,
+            if analysis_is_ai:
+                citation_note = "<b>All citations exactly match contract text.</b>"
+            else:
+                citation_note = (
+                    "<b>Local citation check passed.</b> This is a deterministic "
+                    "text match, not an AI verification of the analysis."
                 )
-            )
+            story.append(Paragraph(citation_note, meta_style))
         story.append(
             Paragraph(
                 f"<b>Rules reviewed:</b> {total_cnt} | <b>Compliant:</b> {compliant_cnt} | "
@@ -321,9 +540,14 @@ class AuditReportGenerator:
         )
         story.append(Spacer(1, 12))
 
+        result_header = (
+            "Result (FALLBACK)"
+            if not analysis_is_ai
+            else ("Result (UNVERIFIED)" if not citation_review_passed else "Result")
+        )
         table_data = [[
             "Compliance rule",
-            "Result (UNVERIFIED)" if not citation_review_passed else "Result",
+            result_header,
             "Priority",
             "Risk if missing",
             "Confidence (why)",
@@ -351,7 +575,12 @@ class AuditReportGenerator:
             result_markup = (
                 f"<font color='{color_hex}'><b>{html.escape(res_val)}</b></font>"
             )
-            if not citation_review_passed and res_val.lower() != "compliant":
+            if not analysis_is_ai:
+                result_markup = (
+                    f"<font color='#B45309'><b>FALLBACK</b></font><br/>"
+                    f"{result_markup}"
+                )
+            elif not citation_review_passed and res_val.lower() != "compliant":
                 result_markup = (
                     f"<font color='#B45309'><b>UNVERIFIED</b></font><br/>"
                     f"{result_markup}"
@@ -410,4 +639,4 @@ class AuditReportGenerator:
 
         story.append(results_table)
         doc.build(story)
-        return filename
+        return Path(filename).read_bytes()

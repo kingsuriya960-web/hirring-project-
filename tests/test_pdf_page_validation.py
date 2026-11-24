@@ -69,7 +69,7 @@ def test_critic_rejects_citation_page_beyond_pdf_page_count(monkeypatch):
 
     result = nodes.critic_node(state)
 
-    assert result["status"] == "incomplete"
+    assert result["status"] == "fail"
     assert result["citation_review_status"] == "FAIL"
     assert "Page 8" in result["citation_review_detail"]
     assert result["audit_report"]["findings"] == []
@@ -370,7 +370,7 @@ def test_critic_rejects_quote_assigned_to_the_wrong_source_page(monkeypatch):
 
         result = nodes.critic_node(state)
 
-        assert result["status"] == "incomplete"
+        assert result["status"] == "fail"
         assert result["citation_review_status"] == "FAIL"
         assert "does not appear verbatim on cited Page 2" in result["citation_review_detail"]
 
@@ -398,7 +398,7 @@ def test_critic_rejects_page_reference_without_a_verbatim_quote(monkeypatch):
 
     result = nodes.critic_node(state)
 
-    assert result["status"] == "incomplete"
+    assert result["status"] == "fail"
     assert "no verbatim quote" in result["citation_review_detail"]
 
 

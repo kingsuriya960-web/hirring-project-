@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response, Streamin
 from starlette.concurrency import run_in_threadpool
 
 from app.agents.graph import create_compliance_graph
-from app.agents.nodes import auditor_node, critic_node
+from app.agents.nodes import auditor_node, critic_node, gatekeeper_node
 from app.services.parser import DocumentParserService
 from app.services.report_generator import AuditReportGenerator
 
@@ -47,7 +47,7 @@ def get_graph():
     """Compiles the LangGraph workflow once and reuses it across requests."""
     global _GRAPH
     if _GRAPH is None:
-        _GRAPH = create_compliance_graph(auditor_node, critic_node)
+        _GRAPH = create_compliance_graph(auditor_node, critic_node, gatekeeper_node)
     return _GRAPH
 
 
@@ -106,6 +106,23 @@ def finding_counts(final_state: Dict[str, Any], rules_count: int) -> Dict[str, i
         else:
             counts["gap"] += 1
     return counts
+
+
+def analysis_is_fallback(final_state: Dict[str, Any]) -> bool:
+    model = str(final_state.get("model_used") or "").lower()
+    report_analysis = (
+        (final_state.get("audit_report") or {}).get("analysis")
+        if isinstance(final_state.get("audit_report"), dict)
+        else {}
+    )
+    mode = str(
+        report_analysis.get("mode") if isinstance(report_analysis, dict) else ""
+    ).lower()
+    return (
+        "heuristic" in model
+        or "fallback" in model
+        or mode == "heuristic_fallback"
+    )
 
 
 def render_report_pdf(document_name: str, final_state: Dict[str, Any]) -> bytes:
@@ -251,6 +268,15 @@ async def auto_audit(file: UploadFile = File(...), rules: str = Form(...)) -> Re
     final_state["contract_type"] = contract_type
     final_state["rule_alignment_warning"] = rule_alignment_warning
 
+    if final_state.get("guardrail_status") == "blocked":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Audit blocked by the prompt-injection guardrail: "
+                f"{final_state.get('guardrail_reason') or 'malicious instruction detected'}"
+            ),
+        )
+
     if final_state.get("ai_error"):
         raise HTTPException(
             status_code=502,
@@ -261,7 +287,7 @@ async def auto_audit(file: UploadFile = File(...), rules: str = Form(...)) -> Re
         )
     has_findings = bool((final_state.get("audit_report") or {}).get("findings"))
     review_incomplete = (
-        final_state.get("status") == "incomplete"
+        final_state.get("status") in {"incomplete", "fail"}
         and final_state.get("citation_review_status") != "PASS"
     )
     if not has_findings and not review_incomplete:
@@ -281,18 +307,29 @@ async def auto_audit(file: UploadFile = File(...), rules: str = Form(...)) -> Re
 
     counts = finding_counts(final_state, len(parsed_rules))
     report_name = f"COMPLIANCE_AUDIT_{safe_filename_stem(file.filename)}.pdf"
+    fallback = analysis_is_fallback(final_state)
     headers = {
         "Content-Disposition": f'attachment; filename="{report_name}"',
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "X-Audit-Run-Id": uuid.uuid4().hex,
         "X-Finding-Counts": json.dumps(counts),
         "X-Rule-Alignment": "warning" if rule_alignment_warning else "ok",
         "X-Citation-Review": str(
             final_state.get("citation_review_status") or "NOT RUN"
         ).encode("ascii", "ignore").decode("ascii"),
+        "X-Model-Used": str(final_state.get("model_used") or "unknown")
+        .encode("ascii", "ignore")
+        .decode("ascii"),
         "X-Analysis-Status": (
-            "verified"
-            if final_state.get("citation_review_status") == "PASS"
-            and final_state.get("status") == "pass"
-            else "incomplete"
+            "fallback"
+            if fallback
+            else (
+                "verified"
+                if final_state.get("citation_review_status") == "PASS"
+                and final_state.get("status") == "pass"
+                else "incomplete"
+            )
         ),
     }
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
